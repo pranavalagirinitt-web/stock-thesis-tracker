@@ -1,0 +1,13 @@
+-- CreateEnum
+CREATE TYPE "Sector" AS ENUM ('TECH', 'FINANCE', 'HEALTHCARE', 'ENERGY', 'CONSUMER', 'INDUSTRIAL', 'REAL_ESTATE', 'OTHER');
+
+-- CreateEnum
+CREATE TYPE "CapSize" AS ENUM ('LARGE_CAP', 'MID_CAP', 'SMALL_CAP', 'MICRO_CAP');
+
+-- CreateEnum
+CREATE TYPE "Strategy" AS ENUM ('LONG_TERM', 'SHORT_TERM', 'SPECULATIVE', 'DIVIDEND');
+
+-- AlterTable
+ALTER TABLE "WatchlistItem" ADD COLUMN     "capSize" "CapSize" NOT NULL DEFAULT 'LARGE_CAP',
+ADD COLUMN     "sector" "Sector" NOT NULL DEFAULT 'OTHER',
+ADD COLUMN     "strategy" "Strategy" NOT NULL DEFAULT 'LONG_TERM';

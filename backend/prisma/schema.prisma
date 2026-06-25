@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+  watchlist WatchlistItem[]
+  notes     Note[]
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model WatchlistItem {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  symbol      String
+  companyName String
+  market      Market
+  sector      Sector    @default(OTHER)
+  capSize     CapSize   @default(LARGE_CAP)
+  strategy    Strategy  @default(LONG_TERM)
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id])
+  thesisCases ThesisCase[]
+  notes       Note[]
+
+  @@unique([userId, symbol])
+}
+
+enum Market {
+  US
+  IN
+}
+
+enum Sector {
+  TECH
+  FINANCE
+  HEALTHCARE
+  ENERGY
+  CONSUMER
+  INDUSTRIAL
+  REAL_ESTATE
+  OTHER
+}
+
+enum CapSize {
+  LARGE_CAP
+  MID_CAP
+  SMALL_CAP
+  MICRO_CAP
+}
+
+enum Strategy {
+  LONG_TERM
+  SHORT_TERM
+  SPECULATIVE
+  DIVIDEND
+}
+
+model ThesisCase {
+  id              Int      @id @default(autoincrement())
+  watchlistItemId Int
+  type            ThesisType
+  explanation     String?
+  createdAt       DateTime @default(now())
+  watchlistItem   WatchlistItem @relation(fields: [watchlistItemId], references: [id])
+  conditions      ThesisCondition[]
+
+  @@unique([watchlistItemId, type])
+}
+
+enum ThesisType {
+  BUY
+  HOLD
+  SELL
+}
+
+model ThesisCondition {
+  id           Int      @id @default(autoincrement())
+  thesisCaseId Int
+  metric       String
+  operator     String
+  value        Float
+  createdAt    DateTime @default(now())
+  thesisCase   ThesisCase @relation(fields: [thesisCaseId], references: [id])
+}
+
+model Note {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  watchlistItemId Int
+  content         String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id])
+  watchlistItem   WatchlistItem @relation(fields: [watchlistItemId], references: [id])
+}
