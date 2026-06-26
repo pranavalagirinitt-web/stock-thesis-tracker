@@ -35,7 +35,8 @@ function evaluateThesis(thesisCases, financials) {
   return results;
 }
 
-function ThesisStatusBadge({ thesisCases, financials }) {
+function ThesisStatusBadge({ thesisCases, financials, financialsLoading }) {
+  if (financialsLoading) return <span className="px-2 py-1 rounded text-xs font-mono bg-gray-800 text-gray-400">⏳ Loading...</span>;
   const results = evaluateThesis(thesisCases, financials);
   const triggered = Object.entries(results).filter(([, v]) => v).map(([k]) => k);
 
@@ -64,6 +65,7 @@ export default function Dashboard() {
   const [watchlist, setWatchlist] = useState([]);
   const [financialsMap, setFinancialsMap] = useState({});
   const [loading, setLoading] = useState(true);
+  const [financialsLoading, setFinancialsLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -81,7 +83,7 @@ export default function Dashboard() {
     try {
       const res = await api.get('/watchlist');
       setWatchlist(res.data);
-      fetchAllFinancials(res.data);
+      await fetchAllFinancials(res.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -90,14 +92,16 @@ export default function Dashboard() {
   };
 
   const fetchAllFinancials = async (items) => {
+    setFinancialsLoading(true);
     const map = {};
-    await Promise.all(items.map(async (item) => {
+    for (const item of items) {
       try {
         const res = await api.get(`/stock/${item.symbol}/financials?market=${item.market}`);
         map[item.symbol] = res.data;
       } catch { map[item.symbol] = null; }
-    }));
+    }
     setFinancialsMap(map);
+    setFinancialsLoading(false);
   };
 
   const handleSearch = async (q) => {
@@ -310,6 +314,7 @@ export default function Dashboard() {
                   <ThesisStatusBadge
                     thesisCases={stock.thesisCases}
                     financials={financialsMap[stock.symbol]}
+                    financialsLoading={financialsLoading}
                   />
                 </div>
               </div>

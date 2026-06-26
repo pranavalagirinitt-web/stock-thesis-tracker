@@ -1,31 +1,44 @@
 const express = require('express');
 const router = express.Router();
-const yahooFinance = require('yahoo-finance2').default;
+const axios = require('axios');
 const { authenticate } = require('../middleware/auth');
+
+const AV_KEY = process.env.ALPHA_VANTAGE_KEY;
+const AV_BASE = 'https://www.alphavantage.co/query';
 
 // GET /api/stock/search?q=apple&market=US
 router.get('/search', authenticate, async (req, res) => {
   const { q, market } = req.query;
-
   if (!q) return res.status(400).json({ message: 'Query is required.' });
 
   try {
-    const results = await yahooFinance.search(q);
-    let quotes = results.quotes || [];
+    const response = await axios.get(AV_BASE, {
+      params: {
+        function: 'SYMBOL_SEARCH',
+        keywords: q,
+        apikey: AV_KEY
+      }
+    });
 
-    if (market === 'IN') {
-      quotes = quotes.filter(q => q.exchange === 'NSI' || q.exchange === 'BSE');
-    } else if (market === 'US') {
-      quotes = quotes.filter(q => ['NMS', 'NYQ', 'NGM', 'NCM'].includes(q.exchange));
+    let results = response.data.bestMatches || [];
+
+    if (market === 'US') {
+      results = results.filter(r => r['4. region'] === 'United States');
+    } else if (market === 'IN') {
+      results = results.filter(r => 
+        r['4. region'].includes('India') || 
+        r['1. symbol'].endsWith('.BSE') || 
+        r['1. symbol'].endsWith('.NSE')
+      );
     }
 
-    const filtered = quotes.slice(0, 8).map(q => ({
-      symbol: q.symbol,
-      companyName: q.longname || q.shortname,
-      exchange: q.exchange
+    const formatted = results.slice(0, 8).map(r => ({
+      symbol: r['1. symbol'],
+      companyName: r['2. name'],
+      exchange: r['4. region']
     }));
 
-    res.json(filtered);
+    res.json(formatted);
   } catch (err) {
     res.status(500).json({ message: 'Search failed.', error: err.message });
   }
@@ -34,71 +47,65 @@ router.get('/search', authenticate, async (req, res) => {
 // GET /api/stock/:symbol/financials
 router.get('/:symbol/financials', authenticate, async (req, res) => {
   try {
-    let { symbol } = req.params;
-    const { market } = req.query;
+    const { symbol } = req.params;
 
-    if (market === 'IN' && !symbol.endsWith('.NS')) {
-      symbol = `${symbol}.NS`;
+    const [overviewRes, quoteRes] = await Promise.all([
+      axios.get(AV_BASE, { params: { function: 'OVERVIEW', symbol, apikey: AV_KEY } }),
+      axios.get(AV_BASE, { params: { function: 'GLOBAL_QUOTE', symbol, apikey: AV_KEY } })
+    ]);
+
+    const o = overviewRes.data;
+    const q = quoteRes.data['Global Quote'] || {};
+
+    if (!o || !o.Symbol) {
+      return res.status(404).json({ message: 'Stock not found.' });
     }
 
-    const quote = await yahooFinance.quoteSummary(symbol, {
-      modules: ['summaryDetail', 'financialData', 'defaultKeyStatistics', 'incomeStatementHistory']
-    });
-
-    const sd = quote.summaryDetail || {};
-    const fd = quote.financialData || {};
-    const ks = quote.defaultKeyStatistics || {};
-
     const financials = {
-      // Core
-      currentPrice: fd.currentPrice ?? null,
-      currency: fd.financialCurrency ?? null,
-      marketCap: sd.marketCap ?? null,
+      currentPrice: parseFloat(q['05. price']) || null,
+      currency: o.Currency || null,
+      marketCap: parseFloat(o.MarketCapitalization) || null,
 
       // Valuation
-      peRatio: sd.trailingPE ?? null,
-      forwardPE: sd.forwardPE ?? null,
-      pbRatio: ks.priceToBook ?? null,
-      psRatio: ks.priceToSalesTrailing12Months ?? null,
-      pegRatio: ks.pegRatio ?? null,
-      evToEbitda: ks.enterpriseToEbitda ?? null,
-      evToRevenue: ks.enterpriseToRevenue ?? null,
+      peRatio: parseFloat(o.PERatio) || null,
+      forwardPE: parseFloat(o.ForwardPE) || null,
+      pbRatio: parseFloat(o.PriceToBookRatio) || null,
+      psRatio: parseFloat(o.PriceToSalesRatioTTM) || null,
+      pegRatio: parseFloat(o.PEGRatio) || null,
+      evToEbitda: parseFloat(o.EVToEBITDA) || null,
+      evToRevenue: parseFloat(o.EVToRevenue) || null,
 
       // Profitability
-      profitMargin: fd.profitMargins ? +(fd.profitMargins * 100).toFixed(2) : null,
-      operatingMargin: fd.operatingMargins ? +(fd.operatingMargins * 100).toFixed(2) : null,
-      grossMargin: fd.grossMargins ? +(fd.grossMargins * 100).toFixed(2) : null,
-      ebitdaMargin: fd.ebitdaMargins ? +(fd.ebitdaMargins * 100).toFixed(2) : null,
-      roe: fd.returnOnEquity ? +(fd.returnOnEquity * 100).toFixed(2) : null,
-      roa: fd.returnOnAssets ? +(fd.returnOnAssets * 100).toFixed(2) : null,
+      profitMargin: parseFloat(o.ProfitMargin) ? +(parseFloat(o.ProfitMargin) * 100).toFixed(2) : null,
+      operatingMargin: parseFloat(o.OperatingMarginTTM) ? +(parseFloat(o.OperatingMarginTTM) * 100).toFixed(2) : null,
+      grossMargin: parseFloat(o.GrossProfitTTM) || null,
+      roe: parseFloat(o.ReturnOnEquityTTM) ? +(parseFloat(o.ReturnOnEquityTTM) * 100).toFixed(2) : null,
+      roa: parseFloat(o.ReturnOnAssetsTTM) ? +(parseFloat(o.ReturnOnAssetsTTM) * 100).toFixed(2) : null,
 
       // Per Share
-      eps: ks.trailingEps ?? null,
-      forwardEps: ks.forwardEps ?? null,
-      bookValuePerShare: ks.bookValue ?? null,
-      revenuePerShare: fd.revenuePerShare ?? null,
-      cashPerShare: ks.totalCashPerShare ?? null,
+      eps: parseFloat(o.EPS) || null,
+      forwardEps: parseFloat(o.ForwardAnnualDividendYield) || null,
+      bookValuePerShare: parseFloat(o.BookValue) || null,
+      revenuePerShare: parseFloat(o.RevenuePerShareTTM) || null,
 
       // Growth
-      revenueGrowth: fd.revenueGrowth ? +(fd.revenueGrowth * 100).toFixed(2) : null,
-      earningsGrowth: fd.earningsGrowth ? +(fd.earningsGrowth * 100).toFixed(2) : null,
+      revenueGrowth: parseFloat(o.QuarterlyRevenueGrowthYOY) ? +(parseFloat(o.QuarterlyRevenueGrowthYOY) * 100).toFixed(2) : null,
+      earningsGrowth: parseFloat(o.QuarterlyEarningsGrowthYOY) ? +(parseFloat(o.QuarterlyEarningsGrowthYOY) * 100).toFixed(2) : null,
 
-      // Financial Health / Ratios
-      currentRatio: fd.currentRatio ?? null,
-      quickRatio: fd.quickRatio ?? null,
-      deRatio: fd.debtToEquity ?? null,
-      freeCashFlow: fd.freeCashflow ?? null,
-      totalCash: fd.totalCash ?? null,
-      totalDebt: fd.totalDebt ?? null,
+      // Financial Health
+      currentRatio: parseFloat(o.CurrentRatio) || null,
+      quickRatio: parseFloat(o.QuickRatio) || null,
+      deRatio: parseFloat(o.DebtToEquityRatio) || null,
+      freeCashFlow: parseFloat(o.FreeCashFlow) || null,
 
       // Dividend
-      dividendYield: sd.dividendYield ? +(sd.dividendYield * 100).toFixed(2) : null,
+      dividendYield: parseFloat(o.DividendYield) ? +(parseFloat(o.DividendYield) * 100).toFixed(2) : null,
 
       // Market
-      beta: sd.beta ?? null,
-      fiftyTwoWeekHigh: sd.fiftyTwoWeekHigh ?? null,
-      fiftyTwoWeekLow: sd.fiftyTwoWeekLow ?? null,
-      averageVolume: sd.averageVolume ?? null,
+      beta: parseFloat(o.Beta) || null,
+      fiftyTwoWeekHigh: parseFloat(o['52WeekHigh']) || null,
+      fiftyTwoWeekLow: parseFloat(o['52WeekLow']) || null,
+      averageVolume: parseFloat(o.SharesFloat) || null,
     };
 
     res.json(financials);
